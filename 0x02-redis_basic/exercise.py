@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-""" Cache class using Redis with call counting """
+""" Cache class with Redis decorators for counting and history """
 import redis
 import uuid
 from typing import Union, Callable, Optional
@@ -10,10 +10,24 @@ def count_calls(method: Callable) -> Callable:
     """Decorator to count how many times a method is called"""
     @wraps(method)
     def wrapper(self, *args, **kwargs):
-        # Use qualified name as Redis key
         key = method.__qualname__
         self._redis.incr(key)
         return method(self, *args, **kwargs)
+    return wrapper
+
+
+def call_history(method: Callable) -> Callable:
+    """Decorator to store the history of inputs and outputs of a method"""
+    @wraps(method)
+    def wrapper(self, *args, **kwargs):
+        input_key = method.__qualname__ + ":inputs"
+        output_key = method.__qualname__ + ":outputs"
+        # Store input
+        self._redis.rpush(input_key, str(args))
+        # Call the method and store output
+        result = method(self, *args, **kwargs)
+        self._redis.rpush(output_key, str(result))
+        return result
     return wrapper
 
 
@@ -23,6 +37,7 @@ class Cache:
         self._redis = redis.Redis()
         self._redis.flushdb()
 
+    @call_history
     @count_calls
     def store(self, data: Union[str, bytes, int, float]) -> str:
         """ Store data with a random UUID key """
